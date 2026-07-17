@@ -8,7 +8,7 @@ from besttake.models import MediaMetadata
 logger = logging.getLogger("BestTake")
 
 class FileArchiver:
-    """Handles directory creation, safe moves, renaming collisions, and symlink creation."""
+    """Handles directory creation, safe moves, renaming collisions, and physical archiving."""
     def __init__(self, scan_dir: Path, output_dir: Path, dry_run: bool = False):
         self.scan_dir = scan_dir
         self.output_dir = output_dir
@@ -67,13 +67,12 @@ class FileArchiver:
         ]
 
         # 1. Create reference symlink to the Winner inside the duplicate group directory
+        # (This is just for side-by-side local review in the duplicates directory)
         ref_symlink = group_dir / f"winner_ref_{winner_path.name}"
         if not self.dry_run:
             try:
-                # If symlink already exists, remove it
                 if ref_symlink.exists() or ref_symlink.is_symlink():
                     ref_symlink.unlink()
-                # Create relative or absolute symlink
                 ref_symlink.symlink_to(winner_path.resolve())
             except Exception as e:
                 logger.debug(f"Failed to create winner reference symlink: {e}")
@@ -103,7 +102,7 @@ class FileArchiver:
                 f.write("\n".join(info_lines))
 
     def create_keep_symlink(self, media: MediaMetadata):
-        """Creates a symlink inside the keep/ subdirectories (me, others, scenery) preserving relative structures."""
+        """Moves the kept media file into the keep/ subdirectories (me, others, scenery) preserving relative structures."""
         src_path = Path(media.file_path)
         if not src_path.exists():
             return
@@ -122,12 +121,13 @@ class FileArchiver:
         else:
             target_keep_dir = self.keep_scenery_dir
 
-        dest_link = target_keep_dir / rel_path
+        dest_file = target_keep_dir / rel_path
+        logger.info(f"Moving keep file: {src_path} -> {dest_file}")
         if not self.dry_run:
-            dest_link.parent.mkdir(parents=True, exist_ok=True)
+            dest_file.parent.mkdir(parents=True, exist_ok=True)
             try:
-                if dest_link.exists() or dest_link.is_symlink():
-                    dest_link.unlink()
-                dest_link.symlink_to(src_path.resolve())
+                if dest_file.exists():
+                    dest_file = self._get_unique_dest_path(dest_file.parent, dest_file.name)
+                shutil.move(str(src_path), str(dest_file))
             except Exception as e:
-                logger.debug(f"Failed to create keep symlink for {src_path}: {e}")
+                logger.error(f"Failed to move keep file {src_path} -> {dest_file}: {e}")

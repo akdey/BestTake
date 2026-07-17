@@ -177,61 +177,63 @@ class TestBestTake(unittest.TestCase):
         info_file = self.output_dir / "duplicates" / "group_001" / "group_info.md"
         self.assertTrue(info_file.exists())
 
-        # Test keep folder link segregation
-        singleton_path = self.scan_dir / "unique.jpg"
-        singleton_img = Image.new("RGB", (100, 100), color="green")
-        singleton_img.save(singleton_path)
-
+        # Test keep folder file segregation moves
         # 1. Scenery (me_present = 0)
+        scenery_path = self.scan_dir / "scenery.jpg"
+        Image.new("RGB", (100, 100), color="green").save(scenery_path)
         singleton_scenery = MediaMetadata(
-            file_path=str(singleton_path),
+            file_path=str(scenery_path),
             file_type="image",
             file_size=150,
             modified_time=1.0,
-            md5_hash="md5_singleton",
+            md5_hash="md5_scenery",
             perceptual_hash="0000000000000000",
             width=100,
             height=100,
             me_present=0
         )
         archiver.create_keep_symlink(singleton_scenery)
-        keep_link_scenery = self.output_dir / "keep" / "scenery" / "unique.jpg"
-        self.assertTrue(keep_link_scenery.is_symlink())
-        self.assertEqual(keep_link_scenery.resolve(), singleton_path.resolve())
+        keep_file_scenery = self.output_dir / "keep" / "scenery" / "scenery.jpg"
+        self.assertTrue(keep_file_scenery.exists())
+        self.assertFalse(scenery_path.exists())
 
         # 2. Me (me_present = 1)
+        me_path = self.scan_dir / "me.jpg"
+        Image.new("RGB", (100, 100), color="blue").save(me_path)
         singleton_me = MediaMetadata(
-            file_path=str(singleton_path),
+            file_path=str(me_path),
             file_type="image",
             file_size=150,
             modified_time=1.0,
-            md5_hash="md5_singleton",
+            md5_hash="md5_me",
             perceptual_hash="0000000000000000",
             width=100,
             height=100,
             me_present=1
         )
         archiver.create_keep_symlink(singleton_me)
-        keep_link_me = self.output_dir / "keep" / "me" / "unique.jpg"
-        self.assertTrue(keep_link_me.is_symlink())
-        self.assertEqual(keep_link_me.resolve(), singleton_path.resolve())
+        keep_file_me = self.output_dir / "keep" / "me" / "me.jpg"
+        self.assertTrue(keep_file_me.exists())
+        self.assertFalse(me_path.exists())
 
         # 3. Others (me_present = 2)
+        others_path = self.scan_dir / "others.jpg"
+        Image.new("RGB", (100, 100), color="red").save(others_path)
         singleton_others = MediaMetadata(
-            file_path=str(singleton_path),
+            file_path=str(others_path),
             file_type="image",
             file_size=150,
             modified_time=1.0,
-            md5_hash="md5_singleton",
+            md5_hash="md5_others",
             perceptual_hash="0000000000000000",
             width=100,
             height=100,
             me_present=2
         )
         archiver.create_keep_symlink(singleton_others)
-        keep_link_others = self.output_dir / "keep" / "others" / "unique.jpg"
-        self.assertTrue(keep_link_others.is_symlink())
-        self.assertEqual(keep_link_others.resolve(), singleton_path.resolve())
+        keep_file_others = self.output_dir / "keep" / "others" / "others.jpg"
+        self.assertTrue(keep_file_others.exists())
+        self.assertFalse(others_path.exists())
 
     def test_winner_selection_override(self):
         m1 = MediaMetadata("p1.jpg", "image", 200, 1.0, "md5_1", "h1", width=640, height=480, me_present=1)
