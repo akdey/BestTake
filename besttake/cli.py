@@ -24,6 +24,114 @@ logger = logging.getLogger("BestTake")
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp'}
 VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.mov', '.avi'}
 
+def write_summary_report(output_path, singletons, all_winners, resolved_groups, failed_files, face_filtering_enabled, space_saved, scan_path):
+    report_file = output_path / "summary_report.md"
+    
+    keepers_me = []
+    keepers_others = []
+    keepers_scenery = []
+    
+    def add_to_keepers(meta):
+        if meta.me_present == 1:
+            keepers_me.append(meta)
+        elif meta.me_present == 2:
+            keepers_others.append(meta)
+        else:
+            keepers_scenery.append(meta)
+            
+    for m in singletons:
+        add_to_keepers(m)
+    for m in all_winners:
+        add_to_keepers(m)
+        
+    total_scanned = len(singletons) + len(all_winners) + sum(len(losers) for _, losers in resolved_groups) + len(failed_files)
+    
+    lines = [
+        "# BestTake Reorganization & Deduplication Report\n",
+        "## Execution Summary\n",
+        f"- **Scan Directory**: `{scan_path}`",
+        f"- **Output Directory**: `{output_path}`",
+        f"- **Total Scanned Files**: {total_scanned}",
+        f"- **Total Kept Files**: {len(singletons) + len(all_winners)}",
+        f"  - **Kept (Me)**: {len(keepers_me)}",
+        f"  - **Kept (Others)**: {len(keepers_others)}",
+        f"  - **Kept (Scenery)**: {len(keepers_scenery)}",
+        f"- **Isolated Duplicates**: {sum(len(losers) for _, losers in resolved_groups)}",
+        f"- **Failed / Unreadable Files**: {len(failed_files)}",
+        f"- **Estimated Space Saved**: {space_saved / (1024 * 1024):.2f} MB ({space_saved} bytes)",
+        f"- **Face Filtering Module**: {'ACTIVE' if face_filtering_enabled else 'INACTIVE'}\n",
+        "---\n",
+        "## Detailed Breakdown\n"
+    ]
+    
+    # 1. Me
+    lines.append("### 1. Kept Files with My Face (`keep/me/`)\n")
+    if keepers_me:
+        lines.append("| Original Path | Size | Resolution | Sharpness |")
+        lines.append("| :--- | :--- | :--- | :--- |")
+        for m in sorted(keepers_me, key=lambda x: x.file_path):
+            res_str = f"{m.width}x{m.height}" if m.width else "N/A"
+            sharp_str = f"{m.sharpness:.2f}" if m.sharpness else "N/A"
+            lines.append(f"| `{m.file_path}` | {m.file_size} bytes | {res_str} | {sharp_str} |")
+    else:
+        lines.append("*No files found.*\n")
+    lines.append("")
+    
+    # 2. Others
+    lines.append("### 2. Kept Files with Others' Faces (`keep/others/`)\n")
+    if keepers_others:
+        lines.append("| Original Path | Size | Resolution |")
+        lines.append("| :--- | :--- | :--- |")
+        for m in sorted(keepers_others, key=lambda x: x.file_path):
+            res_str = f"{m.width}x{m.height}" if m.width else "N/A"
+            lines.append(f"| `{m.file_path}` | {m.file_size} bytes | {res_str} |")
+    else:
+        lines.append("*No files found.*\n")
+    lines.append("")
+
+    # 3. Scenery
+    lines.append("### 3. Kept Scenery Files (`keep/scenery/`)\n")
+    if keepers_scenery:
+        lines.append("| Original Path | Size |")
+        lines.append("| :--- | :--- |")
+        for m in sorted(keepers_scenery, key=lambda x: x.file_path):
+            lines.append(f"| `{m.file_path}` | {m.file_size} bytes |")
+    else:
+        lines.append("*No files found.*\n")
+    lines.append("")
+
+    # 4. Failed
+    lines.append("### 4. Failed / Unreadable Media (`failed/`)\n")
+    if failed_files:
+        lines.append("| File Path |")
+        lines.append("| :--- |")
+        for path in sorted(failed_files):
+            lines.append(f"| `{path}` |")
+    else:
+        lines.append("*No failures.*")
+    lines.append("")
+
+    # 5. Duplicates
+    lines.append("### 5. Duplicate Groups (`duplicates/`)\n")
+    if resolved_groups:
+        for idx, (winner, losers) in enumerate(resolved_groups, 1):
+            lines.append(f"#### Group {idx:03d}")
+            lines.append(f"- **Winner (Kept)**: `{winner.file_path}` ({winner.width}x{winner.height}, {winner.file_size} bytes, face status: {winner.me_present})")
+            lines.append("- **Duplicate(s) (Moved to archive)**:")
+            for l in losers:
+                lines.append(f"  - `{l.file_path}` ({l.width}x{l.height}, {l.file_size} bytes, face status: {l.me_present})")
+            lines.append("")
+    else:
+        lines.append("*No duplicates found.*\n")
+
+    try:
+        with open(report_file, "w") as f:
+            f.write("\n".join(lines))
+        logger.info(f"Summary report written to {report_file}")
+    except Exception as e:
+        logger.error(f"Failed to write summary report: {e}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="BestTake: Highly Optimized CLI Tool to Scan and Archive Duplicate Media."
@@ -155,22 +263,6 @@ def main():
             # Check cache
             cached = cached_metadata.get(str(file_path))
             if cached and cached.file_size == file_size and cached.modified_time == mtime:
-                # If face filtering was newly activated but the cached entry didn't run face recognition (or vice versa),
-                # we must force re-processing.
-                # However, if face filtering is inactive, we accept any cached hit.
-                # If active, we only accept if we already processed it (or if it has me_present set, but it default 0 anyway).
-                # Actually, to make it simple: if face filtering is active and the file is in cache, 
-                # wait! If a file is in the cache, does it have face info? 
-                # If the cache was generated without face filtering (me_present = 0), and face filtering is now ACTIVE,
-                # should we reprocess it to check if the user is in it?
-                # Yes! If face filtering is active, we should reprocess files that haven't been evaluated.
-                # But wait, how do we know if it was evaluated?
-                # We can reprocess if the user has reference images and the database has not checked it.
-                # Since we don't store a "face_checked" column, but we have "me_present = 0" default,
-                # we can choose to reprocess or just run with it. To be extremely accurate:
-                # If face_filtering is enabled, we can choose to trust the cache, or if we want to be thorough,
-                # we can let the user clear the cache or run a flag, or we can just run it.
-                # Let's trust the cache by default to keep high performance, but document in README how to clear cache.
                 valid_scanned_metadata.append(cached)
             else:
                 files_to_process.append((str(file_path), file_type))
@@ -245,6 +337,7 @@ def main():
         archiver.move_failed_file(failed_path)
 
     # Process duplicate groups
+    resolved_groups = []
     for group_idx, cluster in enumerate(duplicate_clusters, 1):
         winner, losers = QualityEvaluator.resolve_cluster(cluster)
         all_winners.append(winner)
@@ -253,6 +346,7 @@ def main():
         space_saved += sum(l.file_size for l in losers)
         
         archiver.archive_duplicate_group(group_idx, winner, losers)
+        resolved_groups.append((winner, losers))
 
     # Keep list contains:
     # - Winners of duplicate groups
@@ -268,6 +362,13 @@ def main():
         archiver.create_keep_symlink(singleton)
     for winner in all_winners:
         archiver.create_keep_symlink(winner)
+
+    # Write detailed summary report file to output directory
+    if not args.dry_run:
+        write_summary_report(
+            output_path, singletons, all_winners, resolved_groups,
+            failed_files, face_filtering_enabled, space_saved, scan_path
+        )
 
     # Print Report
     print("\n" + "="*50)
