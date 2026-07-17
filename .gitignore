@@ -1,0 +1,20 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+
+# SQLite Database Cache
+media_cache.db
+media_cache.db-journal
+
+# OS-specific files
+.DS_Store
+
+# User Personal Reference Images (ignore files, keep folder)
+me_references/*
+!me_references/.gitkeep
