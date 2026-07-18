@@ -1,16 +1,22 @@
 document.addEventListener('DOMContentLoaded', () => {
-  // UI Elements
+  // Elements
   const refDropzone = document.getElementById('refDropzone');
   const refFileInput = document.getElementById('refFileInput');
   const referencesList = document.getElementById('referencesList');
   const faceStatusBadge = document.getElementById('faceStatusBadge');
 
+  const referenceCard = document.getElementById('referenceCard');
+  const configCard = document.getElementById('configCard');
+
   const scanForm = document.getElementById('scanForm');
   const scanDirInput = document.getElementById('scanDirInput');
   const thresholdInput = document.getElementById('thresholdInput');
   const thresholdVal = document.getElementById('thresholdVal');
+  const faceTolInput = document.getElementById('faceTolInput');
+  const faceTolVal = document.getElementById('faceTolVal');
   const dryRunToggle = document.getElementById('dryRunToggle');
   const startScanBtn = document.getElementById('startScanBtn');
+  const stopScanBtn = document.getElementById('stopScanBtn');
 
   const progressSection = document.getElementById('progressSection');
   const progressStatus = document.getElementById('progressStatus');
@@ -23,6 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const statMe = document.getElementById('statMe');
   const statOthers = document.getElementById('statOthers');
   const statScenery = document.getElementById('statScenery');
+  const statReview = document.getElementById('statReview');
   const statSaved = document.getElementById('statSaved');
 
   const gallerySection = document.getElementById('gallerySection');
@@ -32,14 +39,22 @@ document.addEventListener('DOMContentLoaded', () => {
   const countMe = document.getElementById('countMe');
   const countOthers = document.getElementById('countOthers');
   const countScenery = document.getElementById('countScenery');
+  const countReview = document.getElementById('countReview');
   const countDuplicates = document.getElementById('countDuplicates');
   const countFailed = document.getElementById('countFailed');
 
   const gridMe = document.getElementById('gridMe');
   const gridOthers = document.getElementById('gridOthers');
   const gridScenery = document.getElementById('gridScenery');
+  const gridReview = document.getElementById('gridReview');
   const listDuplicates = document.getElementById('listDuplicates');
   const listFailed = document.getElementById('listFailed');
+
+  const selectAllBtn = document.getElementById('selectAllBtn');
+  const clearSelectBtn = document.getElementById('clearSelectBtn');
+  const bulkActionBar = document.getElementById('bulkActionBar');
+  const bulkSelectedCount = document.getElementById('bulkSelectedCount');
+  const toastContainer = document.getElementById('toastContainer');
 
   const lightboxModal = document.getElementById('lightboxModal');
   const lightboxBody = document.getElementById('lightboxBody');
@@ -47,13 +62,26 @@ document.addEventListener('DOMContentLoaded', () => {
   const lightboxClose = document.getElementById('lightboxClose');
 
   let pollInterval = null;
+  let activeOutputDir = null;
+  let selectedFilePaths = new Set();
 
-  // Threshold Slider Value Update
-  thresholdInput.addEventListener('input', (e) => {
-    thresholdVal.textContent = e.target.value;
-  });
+  // Range Slider Feedback
+  thresholdInput.addEventListener('input', (e) => thresholdVal.textContent = e.target.value);
+  faceTolInput.addEventListener('input', (e) => faceTolVal.textContent = parseFloat(e.target.value).toFixed(2));
 
-  // --- 1. References Management ---
+  // --- Toast System ---
+  function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    toastContainer.appendChild(toast);
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      setTimeout(() => toast.remove(), 300);
+    }, 3500);
+  }
+
+  // --- References Management ---
   async function loadReferences() {
     try {
       const res = await fetch('/api/references');
@@ -88,61 +116,53 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!confirm(`Remove ${filename} from references?`)) return;
     try {
       await fetch(`/api/references/${filename}`, { method: 'DELETE' });
+      showToast(`Deleted reference ${filename}`, 'info');
       loadReferences();
     } catch (err) {
-      alert('Failed to delete reference.');
+      showToast('Failed to delete reference.', 'error');
     }
   };
 
-  // Upload Handlers
   refDropzone.addEventListener('click', () => refFileInput.click());
   refFileInput.addEventListener('change', (e) => uploadFiles(e.target.files));
-
-  refDropzone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    refDropzone.classList.add('hover');
-  });
-
-  refDropzone.addEventListener('dragleave', () => refDropzone.classList.remove('hover'));
-
-  refDropzone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    refDropzone.classList.remove('hover');
-    if (e.dataTransfer.files.length > 0) {
-      uploadFiles(e.dataTransfer.files);
-    }
-  });
 
   async function uploadFiles(files) {
     for (let file of files) {
       const formData = new FormData();
       formData.append('file', file);
       try {
-        await fetch('/api/references/upload', {
+        const res = await fetch('/api/references/upload', {
           method: 'POST',
           body: formData
         });
+        if (res.ok) {
+          showToast(`Uploaded ${file.name}`, 'info');
+        }
       } catch (err) {
-        console.error('Upload failed:', err);
+        showToast(`Failed to upload ${file.name}`, 'error');
       }
     }
     loadReferences();
   }
 
-  // --- 2. Scan Submission & Progress ---
+  // --- Scan Execution & Stop ---
   scanForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const scanDir = scanDirInput.value.trim();
     if (!scanDir) return;
 
     try {
-      startScanBtn.disabled = true;
+      setFormLocked(true);
+      startScanBtn.classList.add('hidden');
+      stopScanBtn.classList.remove('hidden');
+
       const res = await fetch('/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           scan_dir: scanDir,
           threshold: parseInt(thresholdInput.value),
+          face_tolerance: parseFloat(faceTolInput.value),
           dry_run: dryRunToggle.checked
         })
       });
@@ -153,13 +173,35 @@ document.addEventListener('DOMContentLoaded', () => {
       progressSection.classList.remove('hidden');
       summarySection.classList.add('hidden');
       gallerySection.classList.add('hidden');
+      showToast('Scan started...', 'info');
 
       pollInterval = setInterval(checkProgress, 1000);
     } catch (err) {
-      alert(err.message);
-      startScanBtn.disabled = false;
+      showToast(err.message, 'error');
+      setFormLocked(false);
+      startScanBtn.classList.remove('hidden');
+      stopScanBtn.classList.add('hidden');
     }
   });
+
+  stopScanBtn.addEventListener('click', async () => {
+    try {
+      await fetch('/api/scan/stop', { method: 'POST' });
+      showToast('Stopping scan...', 'info');
+    } catch (err) {
+      showToast('Failed to send stop signal.', 'error');
+    }
+  });
+
+  function setFormLocked(locked) {
+    if (locked) {
+      referenceCard.classList.add('card-disabled');
+      configCard.classList.add('card-disabled');
+    } else {
+      referenceCard.classList.remove('card-disabled');
+      configCard.classList.remove('card-disabled');
+    }
+  }
 
   async function checkProgress() {
     try {
@@ -178,8 +220,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (!data.running) {
         clearInterval(pollInterval);
-        startScanBtn.disabled = false;
+        setFormLocked(false);
+        startScanBtn.classList.remove('hidden');
+        stopScanBtn.classList.add('hidden');
+
         if (data.output_dir) {
+          activeOutputDir = data.output_dir;
           loadResults(data.output_dir);
         }
       }
@@ -188,7 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // --- 3. Results & Galleries ---
+  // --- Results & Multi-Select Galleries ---
   async function loadResults(outputDir) {
     try {
       const res = await fetch(`/api/results?output_dir=${encodeURIComponent(outputDir)}`);
@@ -200,21 +246,24 @@ document.addEventListener('DOMContentLoaded', () => {
         statMe.textContent = data.summary.keepers_me;
         statOthers.textContent = data.summary.keepers_others;
         statScenery.textContent = data.summary.keepers_scenery;
+        statReview.textContent = data.summary.keepers_review || 0;
         statSaved.textContent = `${data.summary.space_saved_mb} MB`;
         summarySection.classList.remove('hidden');
       }
 
-      // Counts
       countMe.textContent = data.keep_me.length;
       countOthers.textContent = data.keep_others.length;
       countScenery.textContent = data.keep_scenery.length;
+      countReview.textContent = data.keep_review.length;
       countDuplicates.textContent = data.duplicates.length;
       countFailed.textContent = data.failed.length;
 
-      // Render Media Grids
+      clearSelection();
+
       renderMediaGrid(gridMe, data.keep_me);
       renderMediaGrid(gridOthers, data.keep_others);
       renderMediaGrid(gridScenery, data.keep_scenery);
+      renderMediaGrid(gridReview, data.keep_review);
       renderDuplicates(listDuplicates, data.duplicates);
       renderFailed(listFailed, data.failed);
 
@@ -231,8 +280,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     container.innerHTML = items.map(item => `
-      <div class="media-card" onclick="openLightbox('${item.media_url}', '${item.media_type}', '${item.filename}', '${formatBytes(item.size)}')">
-        <div class="thumbnail-wrapper">
+      <div class="media-card ${selectedFilePaths.has(item.path) ? 'selected' : ''}" data-path="${item.path}">
+        <input type="checkbox" class="select-checkbox" ${selectedFilePaths.has(item.path) ? 'checked' : ''} onclick="toggleSelectFile(event, '${item.path}')">
+        <div class="thumbnail-wrapper" onclick="openLightbox('${item.media_url}', '${item.media_type}', '${item.filename}', '${formatBytes(item.size)}')">
           ${item.media_type === 'video'
             ? `<video src="${item.media_url}#t=0.5" preload="metadata"></video>`
             : `<img src="${item.media_url}" alt="${item.filename}" loading="lazy">`}
@@ -298,7 +348,85 @@ document.addEventListener('DOMContentLoaded', () => {
     `).join('');
   }
 
-  // --- 4. Tabs Switching ---
+  // --- Multi-Select & Bulk Moving ---
+  window.toggleSelectFile = (e, path) => {
+    e.stopPropagation();
+    if (selectedFilePaths.has(path)) {
+      selectedFilePaths.delete(path);
+    } else {
+      selectedFilePaths.add(path);
+    }
+    updateSelectionUI();
+  };
+
+  function updateSelectionUI() {
+    const cards = document.querySelectorAll('.media-card');
+    cards.forEach(card => {
+      const p = card.dataset.path;
+      if (selectedFilePaths.has(p)) {
+        card.classList.add('selected');
+      } else {
+        card.classList.remove('selected');
+      }
+    });
+
+    if (selectedFilePaths.size > 0) {
+      bulkSelectedCount.textContent = selectedFilePaths.size;
+      bulkActionBar.classList.remove('hidden');
+      clearSelectBtn.classList.remove('hidden');
+    } else {
+      bulkActionBar.classList.add('hidden');
+      clearSelectBtn.classList.add('hidden');
+    }
+  }
+
+  function clearSelection() {
+    selectedFilePaths.clear();
+    updateSelectionUI();
+  }
+
+  clearSelectBtn.addEventListener('click', clearSelection);
+
+  selectAllBtn.addEventListener('click', () => {
+    const activeTab = document.querySelector('.tab-content.active');
+    if (activeTab) {
+      const cards = activeTab.querySelectorAll('.media-card');
+      cards.forEach(card => {
+        if (card.dataset.path) selectedFilePaths.add(card.dataset.path);
+      });
+      updateSelectionUI();
+    }
+  });
+
+  window.bulkMoveSelected = async (targetCategory) => {
+    if (selectedFilePaths.size === 0) return;
+
+    try {
+      const res = await fetch('/api/media/move_bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_paths: Array.from(selectedFilePaths),
+          target_category: targetCategory,
+          output_dir: activeOutputDir
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Bulk move failed');
+
+      showToast(`Moved ${data.moved_count} items to ${targetCategory}`, 'info');
+      clearSelection();
+
+      if (activeOutputDir) {
+        loadResults(activeOutputDir);
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  // --- Tabs Navigation ---
   tabBtns.forEach(btn => {
     btn.addEventListener('click', () => {
       tabBtns.forEach(b => b.classList.remove('active'));
@@ -310,7 +438,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // --- 5. Lightbox Modal ---
+  // --- Lightbox Modal ---
   window.openLightbox = (url, type, name, meta) => {
     if (type === 'video') {
       lightboxBody.innerHTML = `<video src="${url}" controls autoplay style="max-width: 100%; max-height: 70vh;"></video>`;
@@ -335,6 +463,5 @@ document.addEventListener('DOMContentLoaded', () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
-  // Initial Load
   loadReferences();
 });

@@ -32,7 +32,7 @@
       <div class="grid-2col">
         
         <!-- Reference Face Picker Card -->
-        <section class="card glass-card">
+        <section class="card glass-card" id="referenceCard">
           <div class="card-header">
             <h2>👤 Face References (`me_references/`)</h2>
             <p class="card-sub">Upload clear photos of yourself so BestTake can prioritize & categorize your photos into <code>keep/me/</code>.</p>
@@ -43,7 +43,7 @@
             <div class="dropzone-content">
               <span class="upload-icon">📤</span>
               <p><strong>Click to upload</strong> or drag & drop reference photos</p>
-              <span class="hint">Photos must contain exactly 1 face</span>
+              <span class="hint">Photos are verified with 2x upsampling face detection</span>
             </div>
           </div>
 
@@ -53,10 +53,10 @@
         </section>
 
         <!-- Scan Configurator Card -->
-        <section class="card glass-card">
+        <section class="card glass-card" id="configCard">
           <div class="card-header">
             <h2>⚙️ Scan Configuration</h2>
-            <p class="card-sub">Set your target directory and deduplication thresholds.</p>
+            <p class="card-sub">Set your target directory, perceptual thresholds, and face precision.</p>
           </div>
 
           <form id="scanForm" class="scan-form">
@@ -67,11 +67,19 @@
 
             <div class="form-row">
               <div class="form-group">
-                <label for="thresholdInput">Similarity Threshold: <span id="thresholdVal">4</span></label>
+                <label for="thresholdInput">Perceptual Threshold: <span id="thresholdVal">4</span></label>
                 <input type="range" id="thresholdInput" min="1" max="10" value="4">
                 <span class="hint">Lower = Stricter | Higher = Looser</span>
               </div>
 
+              <div class="form-group">
+                <label for="faceTolInput">Face Match Distance: <span id="faceTolVal">0.48</span></label>
+                <input type="range" id="faceTolInput" min="0.30" max="0.60" step="0.02" value="0.48">
+                <span class="hint">Lower = Stricter (Prevents wrong matches)</span>
+              </div>
+            </div>
+
+            <div class="form-row">
               <div class="form-group">
                 <label for="dryRunToggle">Dry Run Mode</label>
                 <label class="switch">
@@ -82,9 +90,14 @@
               </div>
             </div>
 
-            <button type="submit" id="startScanBtn" class="btn btn-primary">
-              🚀 Start BestTake Reorganization
-            </button>
+            <div class="btn-group">
+              <button type="submit" id="startScanBtn" class="btn btn-primary">
+                🚀 Start BestTake Reorganization
+              </button>
+              <button type="button" id="stopScanBtn" class="btn btn-danger hidden">
+                🛑 Stop Scan
+              </button>
+            </div>
           </form>
         </section>
 
@@ -99,7 +112,7 @@
         <div class="progress-bar-bg">
           <div id="progressBarFill" class="progress-bar-fill" style="width: 0%;"></div>
         </div>
-      </div>
+      </section>
 
       <!-- Summary Stats Cards -->
       <section id="summarySection" class="stats-grid hidden">
@@ -138,6 +151,13 @@
             <span class="stat-label">Scenery</span>
           </div>
         </div>
+        <div class="stat-card accent-pink">
+          <span class="stat-icon">🔍</span>
+          <div class="stat-info">
+            <span class="stat-value" id="statReview">0</span>
+            <span class="stat-label">Blurry Review</span>
+          </div>
+        </div>
         <div class="stat-card accent-red">
           <span class="stat-icon">💾</span>
           <div class="stat-info">
@@ -149,12 +169,20 @@
 
       <!-- Media Gallery Tabs -->
       <section id="gallerySection" class="card glass-card gallery-card hidden">
-        <div class="tabs-header">
-          <button class="tab-btn active" data-tab="tabMe">👤 My Face (<span id="countMe">0</span>)</button>
-          <button class="tab-btn" data-tab="tabOthers">👥 Others (<span id="countOthers">0</span>)</button>
-          <button class="tab-btn" data-tab="tabScenery">🌄 Scenery (<span id="countScenery">0</span>)</button>
-          <button class="tab-btn" data-tab="tabDuplicates">👯 Duplicates (<span id="countDuplicates">0</span>)</button>
-          <button class="tab-btn" data-tab="tabFailed">⚠️ Failed (<span id="countFailed">0</span>)</button>
+        <div class="gallery-controls">
+          <div class="tabs-header">
+            <button class="tab-btn active" data-tab="tabMe">👤 My Face (<span id="countMe">0</span>)</button>
+            <button class="tab-btn" data-tab="tabOthers">👥 Others (<span id="countOthers">0</span>)</button>
+            <button class="tab-btn" data-tab="tabScenery">🌄 Scenery (<span id="countScenery">0</span>)</button>
+            <button class="tab-btn" data-tab="tabReview">🔍 Review (<span id="countReview">0</span>)</button>
+            <button class="tab-btn" data-tab="tabDuplicates">👯 Duplicates (<span id="countDuplicates">0</span>)</button>
+            <button class="tab-btn" data-tab="tabFailed">⚠️ Failed (<span id="countFailed">0</span>)</button>
+          </div>
+
+          <div class="select-actions">
+            <button id="selectAllBtn" class="btn btn-sm">Select All</button>
+            <button id="clearSelectBtn" class="btn btn-sm btn-ghost hidden">Deselect All</button>
+          </div>
         </div>
 
         <!-- Tab Contents -->
@@ -167,6 +195,9 @@
         <div class="tab-content" id="tabScenery">
           <div class="media-grid" id="gridScenery"></div>
         </div>
+        <div class="tab-content" id="tabReview">
+          <div class="media-grid" id="gridReview"></div>
+        </div>
         <div class="tab-content" id="tabDuplicates">
           <div class="duplicates-list" id="listDuplicates"></div>
         </div>
@@ -176,6 +207,21 @@
       </section>
 
     </main>
+
+    <!-- Floating Bulk Actions Bar -->
+    <div id="bulkActionBar" class="bulk-action-bar hidden">
+      <span class="bulk-count"><strong id="bulkSelectedCount">0</strong> items selected</span>
+      <div class="bulk-buttons">
+        <button class="btn btn-sm btn-blue" onclick="bulkMoveSelected('me')">Move to My Face</button>
+        <button class="btn btn-sm btn-purple" onclick="bulkMoveSelected('others')">Move to Others</button>
+        <button class="btn btn-sm btn-amber" onclick="bulkMoveSelected('scenery')">Move to Scenery</button>
+        <button class="btn btn-sm btn-pink" onclick="bulkMoveSelected('review')">Move to Review</button>
+      </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toastContainer" class="toast-container"></div>
+
   </div>
 
   <!-- Lightbox Modal -->

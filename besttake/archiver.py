@@ -18,6 +18,7 @@ class FileArchiver:
         self.keep_me_dir = self.keep_dir / "me"
         self.keep_others_dir = self.keep_dir / "others"
         self.keep_scenery_dir = self.keep_dir / "scenery"
+        self.keep_review_dir = self.keep_dir / "review"
 
         self.duplicates_dir = output_dir / "duplicates"
         self.failed_dir = output_dir / "failed"
@@ -26,6 +27,7 @@ class FileArchiver:
             self.keep_me_dir.mkdir(parents=True, exist_ok=True)
             self.keep_others_dir.mkdir(parents=True, exist_ok=True)
             self.keep_scenery_dir.mkdir(parents=True, exist_ok=True)
+            self.keep_review_dir.mkdir(parents=True, exist_ok=True)
             self.duplicates_dir.mkdir(parents=True, exist_ok=True)
             self.failed_dir.mkdir(parents=True, exist_ok=True)
 
@@ -66,8 +68,7 @@ class FileArchiver:
             f"\n## Archived Duplicate(s) (Losers)"
         ]
 
-        # 1. Create reference symlink to the Winner inside the duplicate group directory
-        # (This is just for side-by-side local review in the duplicates directory)
+        # Winner reference symlink for local side-by-side inspection
         ref_symlink = group_dir / f"winner_ref_{winner_path.name}"
         if not self.dry_run:
             try:
@@ -77,7 +78,7 @@ class FileArchiver:
             except Exception as e:
                 logger.debug(f"Failed to create winner reference symlink: {e}")
 
-        # 2. Move each duplicate "loser" file
+        # Move duplicate "loser" files
         for idx, loser in enumerate(losers, 1):
             loser_path = Path(loser.file_path)
             dest_path = self._get_unique_dest_path(group_dir, loser_path.name)
@@ -96,28 +97,27 @@ class FileArchiver:
                 if loser_path.exists():
                     shutil.move(str(loser_path), str(dest_path))
 
-        # Write group info markdown file
         if not self.dry_run:
             with open(group_dir / "group_info.md", "w") as f:
                 f.write("\n".join(info_lines))
 
     def create_keep_symlink(self, media: MediaMetadata):
-        """Moves the kept media file into the keep/ subdirectories (me, others, scenery) preserving relative structures."""
+        """Moves the kept media file into keep/ subdirectories (me, others, scenery, review) preserving relative structures."""
         src_path = Path(media.file_path)
         if not src_path.exists():
             return
         
-        # Calculate relative path from scan directory to preserve tree structure
         try:
             rel_path = src_path.relative_to(self.scan_dir)
         except ValueError:
             rel_path = Path(src_path.name)
 
-        # Decide keep folder based on me_present status
         if media.me_present == 1:
             target_keep_dir = self.keep_me_dir
         elif media.me_present == 2:
             target_keep_dir = self.keep_others_dir
+        elif media.me_present == 3:
+            target_keep_dir = self.keep_review_dir
         else:
             target_keep_dir = self.keep_scenery_dir
 

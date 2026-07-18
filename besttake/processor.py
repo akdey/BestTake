@@ -5,13 +5,17 @@ from typing import Tuple, List
 
 logger = logging.getLogger("BestTake")
 
-# Global reference encodings cached inside the process memory space
+# Global reference encodings and config cached inside the process worker memory space
 known_encodings: List = []
+face_tolerance_val: float = 0.48
+min_review_sharpness: float = 50.0
 
-def init_worker(encodings: List):
-    """Initializer for Pool workers to load known face encodings once at startup."""
-    global known_encodings
+def init_worker(encodings: List, tolerance: float = 0.48, review_sharpness: float = 50.0):
+    """Initializer for Pool workers to load known face encodings and config settings."""
+    global known_encodings, face_tolerance_val, min_review_sharpness
     known_encodings = encodings
+    face_tolerance_val = tolerance
+    min_review_sharpness = review_sharpness
 
 
 def compute_md5(file_path: str) -> str:
@@ -26,7 +30,12 @@ def compute_md5(file_path: str) -> str:
 def process_media_worker(args: Tuple[str, str]) -> dict:
     """
     Multiprocessing worker function.
-    Processes a single file and extracts metadata/hashes and face filtering info.
+    Processes a single file and extracts metadata/hashes, sharpness, face status code.
+    Status Codes for me_present:
+    1: User Face Present
+    2: Others' Faces Present
+    0: Scenery (No Faces)
+    3: Review (Low Sharpness / Blurry)
     """
     file_path, file_type = args
     try:
@@ -34,6 +43,10 @@ def process_media_worker(args: Tuple[str, str]) -> dict:
         modified_time = os.path.getmtime(file_path)
         md5_hash = compute_md5(file_path)
         me_present = 0
+
+        global known_encodings, face_tolerance_val, min_review_sharpness
+        tol = face_tolerance_val if 'face_tolerance_val' in globals() else 0.48
+        min_sharp = min_review_sharpness if 'min_review_sharpness' in globals() else 50.0
 
         if file_type == 'image':
             from PIL import Image
@@ -51,19 +64,18 @@ def process_media_worker(args: Tuple[str, str]) -> dict:
                 raise ValueError("OpenCV failed to decode image")
             sharpness = float(cv2.Laplacian(cv_img, cv2.CV_64F).var())
 
-            # 3. Face recognition (if Face Filtering is enabled)
-            global known_encodings
+            # 3. Face recognition with 1x upsampling for higher precision
             if known_encodings:
                 try:
                     import face_recognition
                     face_image = face_recognition.load_image_file(file_path)
-                    face_locs = face_recognition.face_locations(face_image)
+                    # Upsample by 1 to detect smaller, angled, or shadowed faces
+                    face_locs = face_recognition.face_locations(face_image, number_of_times_to_upsample=1)
                     if face_locs:
-                        # At least one face is detected. Default to Others Present (2)
                         me_present = 2
                         face_encs = face_recognition.face_encodings(face_image, face_locs)
                         for enc in face_encs:
-                            matches = face_recognition.compare_faces(known_encodings, enc)
+                            matches = face_recognition.compare_faces(known_encodings, enc, tolerance=tol)
                             if any(matches):
                                 me_present = 1
                                 break
@@ -71,6 +83,10 @@ def process_media_worker(args: Tuple[str, str]) -> dict:
                         me_present = 0
                 except Exception as fe:
                     logger.debug(f"Face filtering failed for image {file_path}: {fe}")
+
+            # If not user's face, check for low sharpness/blurry review
+            if me_present != 1 and sharpness < min_sharp:
+                me_present = 3
 
             return {
                 'status': 'success',
@@ -92,7 +108,6 @@ def process_media_worker(args: Tuple[str, str]) -> dict:
             import imagehash
             from PIL import Image
 
-            # 1. OpenCV Video Capture
             cap = cv2.VideoCapture(file_path)
             if not cap.isOpened():
                 raise ValueError("OpenCV failed to open video file")
@@ -108,7 +123,7 @@ def process_media_worker(args: Tuple[str, str]) -> dict:
 
             duration = frame_count / fps
 
-            # 2. Keyframe Temporal Hashing (10%, 30%, 50%, 70%, 90% duration marks)
+            # Keyframe Temporal Hashing
             marks = [0.1, 0.3, 0.5, 0.7, 0.9]
             frame_indices = [int(m * frame_count) for m in marks]
             frame_indices = [max(0, min(idx, frame_count - 1)) for idx in frame_indices]
@@ -124,11 +139,10 @@ def process_media_worker(args: Tuple[str, str]) -> dict:
                 pil_img = Image.fromarray(frame_rgb)
                 hashes.append(str(imagehash.phash(pil_img)))
 
-            # 3. Dynamic Time-Based Sampling for Face Filtering
+            # Face Filtering with 1x upsampling
             if known_encodings:
                 try:
                     import face_recognition
-                    # Extract one frame every 2 seconds
                     step = int(2.0 * fps)
                     if step <= 0:
                         step = 1
@@ -142,24 +156,23 @@ def process_media_worker(args: Tuple[str, str]) -> dict:
                             frame_idx += step
                             continue
 
-                        # Resize frame to 25% of original width and height to optimize speed
+                        # Resize frame to 50% for improved detail while retaining speed
                         h, w = frame.shape[:2]
-                        resized_frame = cv2.resize(frame, (int(w * 0.25), int(h * 0.25)))
+                        resized_frame = cv2.resize(frame, (int(w * 0.5), int(h * 0.5)))
                         rgb_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
 
-                        # Detect and encode faces
-                        face_locs = face_recognition.face_locations(rgb_frame)
+                        face_locs = face_recognition.face_locations(rgb_frame, number_of_times_to_upsample=1)
                         if face_locs:
                             any_face_detected = True
                             face_encs = face_recognition.face_encodings(rgb_frame, face_locs)
                             for enc in face_encs:
-                                matches = face_recognition.compare_faces(known_encodings, enc)
+                                matches = face_recognition.compare_faces(known_encodings, enc, tolerance=tol)
                                 if any(matches):
                                     me_present = 1
                                     break
                         
                         if me_present == 1:
-                            break  # Early exit on first match
+                            break
                         frame_idx += step
 
                     if me_present != 1:

@@ -30,12 +30,15 @@ def write_summary_report(output_path, singletons, all_winners, resolved_groups, 
     keepers_me = []
     keepers_others = []
     keepers_scenery = []
+    keepers_review = []
     
     def add_to_keepers(meta):
         if meta.me_present == 1:
             keepers_me.append(meta)
         elif meta.me_present == 2:
             keepers_others.append(meta)
+        elif meta.me_present == 3:
+            keepers_review.append(meta)
         else:
             keepers_scenery.append(meta)
             
@@ -56,6 +59,7 @@ def write_summary_report(output_path, singletons, all_winners, resolved_groups, 
         f"  - **Kept (Me)**: {len(keepers_me)}",
         f"  - **Kept (Others)**: {len(keepers_others)}",
         f"  - **Kept (Scenery)**: {len(keepers_scenery)}",
+        f"  - **Kept (Review)**: {len(keepers_review)}",
         f"- **Isolated Duplicates**: {sum(len(losers) for _, losers in resolved_groups)}",
         f"- **Failed / Unreadable Files**: {len(failed_files)}",
         f"- **Estimated Space Saved**: {space_saved / (1024 * 1024):.2f} MB ({space_saved} bytes)",
@@ -100,8 +104,20 @@ def write_summary_report(output_path, singletons, all_winners, resolved_groups, 
         lines.append("*No files found.*\n")
     lines.append("")
 
-    # 4. Failed
-    lines.append("### 4. Failed / Unreadable Media (`failed/`)\n")
+    # 4. Review
+    lines.append("### 4. Low Quality / Blurry Review Files (`keep/review/`)\n")
+    if keepers_review:
+        lines.append("| Original Path | Size | Sharpness |")
+        lines.append("| :--- | :--- | :--- |")
+        for m in sorted(keepers_review, key=lambda x: x.file_path):
+            sharp_str = f"{m.sharpness:.2f}" if m.sharpness else "N/A"
+            lines.append(f"| `{m.file_path}` | {m.file_size} bytes | {sharp_str} |")
+    else:
+        lines.append("*No blurry files found.*\n")
+    lines.append("")
+
+    # 5. Failed
+    lines.append("### 5. Failed / Unreadable Media (`failed/`)\n")
     if failed_files:
         lines.append("| File Path |")
         lines.append("| :--- |")
@@ -111,8 +127,8 @@ def write_summary_report(output_path, singletons, all_winners, resolved_groups, 
         lines.append("*No failures.*")
     lines.append("")
 
-    # 5. Duplicates
-    lines.append("### 5. Duplicate Groups (`duplicates/`)\n")
+    # 6. Duplicates
+    lines.append("### 6. Duplicate Groups (`duplicates/`)\n")
     if resolved_groups:
         for idx, (winner, losers) in enumerate(resolved_groups, 1):
             lines.append(f"#### Group {idx:03d}")
@@ -150,6 +166,10 @@ def main():
                         help="Path to output folder (defaults to _best_take_output in the scan directory).")
     parser.add_argument("--threshold", type=int, default=4,
                         help="Max Hamming distance threshold for perceptual similarity (default: 4).")
+    parser.add_argument("--face-tolerance", type=float, default=0.48,
+                        help="Face match distance tolerance (lower is stricter, default: 0.48).")
+    parser.add_argument("--review-sharpness", type=float, default=50.0,
+                        help="Laplacian variance sharpness threshold for review folder (default: 50.0).")
     parser.add_argument("--duration-tolerance", type=float, default=0.1,
                         help="Video duration tolerance in seconds for similarity (default: 0.1).")
     parser.add_argument("--dry-run", action="store_true",
@@ -159,7 +179,6 @@ def main():
 
     args = parser.parse_args()
 
-    # Launch Web Server if requested
     if args.web:
         import uvicorn
         import webbrowser
@@ -181,17 +200,14 @@ def main():
         logger.error(f"Scan directory does not exist or is not a directory: {scan_path}")
         sys.exit(1)
 
-    # Database Path Setup
     script_dir = Path(__file__).resolve().parent.parent
     db_path = Path(args.db).resolve() if args.db else script_dir / "media_cache.db"
     logger.info(f"Using database cache: {db_path}")
     db_handler = DatabaseHandler(db_path)
 
-    # Output/Archive Directory Setup
     output_path = Path(args.output_dir).resolve() if args.output_dir else scan_path / "_best_take_output"
     logger.info(f"Using output/archive directory: {output_path}")
 
-    # Load reference face encodings for Face Filtering
     known_face_encodings = []
     me_ref_path = Path("me_references")
     face_filtering_enabled = False
@@ -206,7 +222,8 @@ def main():
             for ref_file in ref_files:
                 try:
                     image = face_recognition.load_image_file(str(ref_file))
-                    face_locations = face_recognition.face_locations(image)
+                    # Upsample 2x to detect small or angled faces
+                    face_locations = face_recognition.face_locations(image, number_of_times_to_upsample=2)
                     if len(face_locations) == 1:
                         encs = face_recognition.face_encodings(image, face_locations)
                         if encs:
@@ -233,11 +250,9 @@ def main():
     else:
         logger.info("Face Filtering: INACTIVE (me_references/ directory not found in execution root).")
 
-    # Load existing DB cache
     cached_metadata = db_handler.get_cached_metadata()
     logger.info(f"Loaded {len(cached_metadata)} records from database cache.")
 
-    # 1. Walk directory and collect candidate files
     logger.info(f"Scanning target directory: {scan_path}")
     
     exclude_paths = {output_path}
@@ -285,13 +300,11 @@ def main():
     logger.info(f"Walk complete. Found {len(visited_paths)} total media files.")
     logger.info(f"{len(valid_scanned_metadata)} cached hits. {len(files_to_process)} files need processing.")
 
-    # Remove stale files from DB
     stale_paths = set(cached_metadata.keys()) - visited_paths
     if stale_paths:
         logger.info(f"Removing {len(stale_paths)} stale entries from database cache.")
         db_handler.remove_paths(list(stale_paths))
 
-    # 2. Parallel processing for new/modified files
     processed_results = []
     if files_to_process:
         num_cores = multiprocessing.cpu_count()
@@ -300,7 +313,7 @@ def main():
         with multiprocessing.Pool(
             processes=num_cores,
             initializer=init_worker,
-            initargs=(known_face_encodings,)
+            initargs=(known_face_encodings, args.face_tolerance, args.review_sharpness)
         ) as pool:
             for index, res in enumerate(pool.imap_unordered(process_media_worker, files_to_process), 1):
                 if res['status'] == 'success':
@@ -329,7 +342,6 @@ def main():
             logger.info(f"Saving {len(processed_results)} newly processed records to cache DB.")
             db_handler.save_metadata_batch(processed_results)
 
-    # 3. Clustering
     logger.info("Running clustering algorithms...")
     duplicate_clusters = MediaClusterer.cluster(
         valid_scanned_metadata,
@@ -342,7 +354,6 @@ def main():
     duplicate_count = 0
     space_saved = 0
 
-    # 4. Winner resolution & Safe Moves
     archiver = FileArchiver(scan_path, output_path, dry_run=args.dry_run)
 
     for failed_path in failed_files:
@@ -377,7 +388,6 @@ def main():
             failed_files, face_filtering_enabled, space_saved, scan_path
         )
 
-    # Print Report
     print("\n" + "="*50)
     print("BESTTAKE EXECUTION SUMMARY")
     print("="*50)
