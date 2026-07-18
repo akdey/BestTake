@@ -106,7 +106,25 @@ Inside each duplicate cluster, the files are resolved to pick a single "Winner" 
 
 ## Usage
 
-Run the tool by passing the target scan directory.
+### 🌐 Web Application Interface (Recommended)
+
+Run the interactive local Web Application UI:
+
+```bash
+python best_take.py --web
+```
+
+This will automatically open your web browser at `http://localhost:8000`, where you can:
+- **Drag & Drop profile photos** directly into `me_references/` with real-time face detection feedback.
+- Enter target scan directories and adjust threshold sliders interactively.
+- Track real-time scan progress bars and live logs.
+- Explore interactive galleries for **My Face**, **Others**, **Scenery**, and **Duplicates Comparison** side-by-side with high-resolution lightbox previews.
+
+---
+
+### 💻 Command Line (CLI) Interface
+
+Run the tool by passing the target scan directory directly:
 
 ```bash
 python3 best_take.py /path/to/media/directory

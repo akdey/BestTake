@@ -235,6 +235,18 @@ class TestBestTake(unittest.TestCase):
         self.assertTrue(keep_file_others.exists())
         self.assertFalse(others_path.exists())
 
+    def test_web_endpoints(self):
+        from fastapi.testclient import TestClient
+        from besttake.web import app
+
+        client = TestClient(app)
+        res = client.get("/api/references")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("references", res.json())
+
+        res_root = client.get("/")
+        self.assertEqual(res_root.status_code, 200)
+
     def test_winner_selection_override(self):
         m1 = MediaMetadata("p1.jpg", "image", 200, 1.0, "md5_1", "h1", width=640, height=480, me_present=1)
         m2 = MediaMetadata("p2.jpg", "image", 100, 1.0, "md5_2", "h2", width=320, height=240, me_present=1)

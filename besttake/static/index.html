@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BestTake | Smart Media Deduplicator & Organizer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Navbar Header -->
+    <header class="glass-header">
+      <div class="brand">
+        <div class="logo-icon">📸</div>
+        <div>
+          <h1>BestTake</h1>
+          <span class="badge">AI Media Deduplicator & Face Classifier</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <span id="faceStatusBadge" class="status-pill inactive">Face Filter: Checking...</span>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      
+      <!-- Top Grid: References & Config -->
+      <div class="grid-2col">
+        
+        <!-- Reference Face Picker Card -->
+        <section class="card glass-card">
+          <div class="card-header">
+            <h2>👤 Face References (`me_references/`)</h2>
+            <p class="card-sub">Upload clear photos of yourself so BestTake can prioritize & categorize your photos into <code>keep/me/</code>.</p>
+          </div>
+          
+          <div class="dropzone" id="refDropzone">
+            <input type="file" id="refFileInput" accept="image/*" multiple hidden>
+            <div class="dropzone-content">
+              <span class="upload-icon">📤</span>
+              <p><strong>Click to upload</strong> or drag & drop reference photos</p>
+              <span class="hint">Photos must contain exactly 1 face</span>
+            </div>
+          </div>
+
+          <div class="references-list" id="referencesList">
+            <div class="empty-state">No reference photos uploaded yet.</div>
+          </div>
+        </section>
+
+        <!-- Scan Configurator Card -->
+        <section class="card glass-card">
+          <div class="card-header">
+            <h2>⚙️ Scan Configuration</h2>
+            <p class="card-sub">Set your target directory and deduplication thresholds.</p>
+          </div>
+
+          <form id="scanForm" class="scan-form">
+            <div class="form-group">
+              <label for="scanDirInput">Target Scan Directory Path</label>
+              <input type="text" id="scanDirInput" placeholder="/Users/username/Pictures/Holiday" required>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="thresholdInput">Similarity Threshold: <span id="thresholdVal">4</span></label>
+                <input type="range" id="thresholdInput" min="1" max="10" value="4">
+                <span class="hint">Lower = Stricter | Higher = Looser</span>
+              </div>
+
+              <div class="form-group">
+                <label for="dryRunToggle">Dry Run Mode</label>
+                <label class="switch">
+                  <input type="checkbox" id="dryRunToggle">
+                  <span class="slider"></span>
+                </label>
+                <span class="hint">Simulate without moving files</span>
+              </div>
+            </div>
+
+            <button type="submit" id="startScanBtn" class="btn btn-primary">
+              🚀 Start BestTake Reorganization
+            </button>
+          </form>
+        </section>
+
+      </div>
+
+      <!-- Live Scan Progress Monitor -->
+      <section id="progressSection" class="card glass-card progress-card hidden">
+        <div class="progress-header">
+          <h3 id="progressStatus">Processing...</h3>
+          <span id="progressCount">0 / 0</span>
+        </div>
+        <div class="progress-bar-bg">
+          <div id="progressBarFill" class="progress-bar-fill" style="width: 0%;"></div>
+        </div>
+      </div>
+
+      <!-- Summary Stats Cards -->
+      <section id="summarySection" class="stats-grid hidden">
+        <div class="stat-card">
+          <span class="stat-icon">📁</span>
+          <div class="stat-info">
+            <span class="stat-value" id="statTotal">0</span>
+            <span class="stat-label">Scanned Files</span>
+          </div>
+        </div>
+        <div class="stat-card accent-green">
+          <span class="stat-icon">✨</span>
+          <div class="stat-info">
+            <span class="stat-value" id="statKept">0</span>
+            <span class="stat-label">Unique Keepers</span>
+          </div>
+        </div>
+        <div class="stat-card accent-blue">
+          <span class="stat-icon">👤</span>
+          <div class="stat-info">
+            <span class="stat-value" id="statMe">0</span>
+            <span class="stat-label">My Face</span>
+          </div>
+        </div>
+        <div class="stat-card accent-purple">
+          <span class="stat-icon">👥</span>
+          <div class="stat-info">
+            <span class="stat-value" id="statOthers">0</span>
+            <span class="stat-label">Others</span>
+          </div>
+        </div>
+        <div class="stat-card accent-amber">
+          <span class="stat-icon">🌄</span>
+          <div class="stat-info">
+            <span class="stat-value" id="statScenery">0</span>
+            <span class="stat-label">Scenery</span>
+          </div>
+        </div>
+        <div class="stat-card accent-red">
+          <span class="stat-icon">💾</span>
+          <div class="stat-info">
+            <span class="stat-value" id="statSaved">0 MB</span>
+            <span class="stat-label">Space Saved</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Media Gallery Tabs -->
+      <section id="gallerySection" class="card glass-card gallery-card hidden">
+        <div class="tabs-header">
+          <button class="tab-btn active" data-tab="tabMe">👤 My Face (<span id="countMe">0</span>)</button>
+          <button class="tab-btn" data-tab="tabOthers">👥 Others (<span id="countOthers">0</span>)</button>
+          <button class="tab-btn" data-tab="tabScenery">🌄 Scenery (<span id="countScenery">0</span>)</button>
+          <button class="tab-btn" data-tab="tabDuplicates">👯 Duplicates (<span id="countDuplicates">0</span>)</button>
+          <button class="tab-btn" data-tab="tabFailed">⚠️ Failed (<span id="countFailed">0</span>)</button>
+        </div>
+
+        <!-- Tab Contents -->
+        <div class="tab-content active" id="tabMe">
+          <div class="media-grid" id="gridMe"></div>
+        </div>
+        <div class="tab-content" id="tabOthers">
+          <div class="media-grid" id="gridOthers"></div>
+        </div>
+        <div class="tab-content" id="tabScenery">
+          <div class="media-grid" id="gridScenery"></div>
+        </div>
+        <div class="tab-content" id="tabDuplicates">
+          <div class="duplicates-list" id="listDuplicates"></div>
+        </div>
+        <div class="tab-content" id="tabFailed">
+          <div class="failed-list" id="listFailed"></div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Lightbox Modal -->
+  <div id="lightboxModal" class="lightbox-modal hidden">
+    <div class="lightbox-content">
+      <button class="lightbox-close" id="lightboxClose">&times;</button>
+      <div class="lightbox-body" id="lightboxBody"></div>
+      <div class="lightbox-meta" id="lightboxMeta"></div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

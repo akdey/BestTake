@@ -134,9 +134,16 @@ def write_summary_report(output_path, singletons, all_winners, resolved_groups, 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="BestTake: Highly Optimized CLI Tool to Scan and Archive Duplicate Media."
+        description="BestTake: Smart AI Media Deduplicator and Face Classifier."
     )
-    parser.add_argument("scan_dir", type=str, help="Target directory to recursively scan.")
+    parser.add_argument("scan_dir", type=str, nargs="?", default=None,
+                        help="Target directory to recursively scan.")
+    parser.add_argument("--web", action="store_true",
+                        help="Launch the BestTake Web Application UI in your browser.")
+    parser.add_argument("--host", type=str, default="127.0.0.1",
+                        help="Host IP address for Web UI (default: 127.0.0.1).")
+    parser.add_argument("--port", type=int, default=8000,
+                        help="Port for Web UI (default: 8000).")
     parser.add_argument("--db", type=str, default=None,
                         help="Path to SQLite cache DB (defaults to media_cache.db in script root).")
     parser.add_argument("--output-dir", type=str, default=None,
@@ -151,6 +158,20 @@ def main():
                         help="Print detailed debug messages.")
 
     args = parser.parse_args()
+
+    # Launch Web Server if requested
+    if args.web:
+        import uvicorn
+        import webbrowser
+        url = f"http://{args.host}:{args.port}"
+        logger.info(f"Launching BestTake Web Interface on {url} ...")
+        webbrowser.open(url)
+        uvicorn.run("besttake.web:app", host=args.host, port=args.port, reload=False)
+        sys.exit(0)
+
+    if not args.scan_dir:
+        parser.print_help()
+        sys.exit(1)
 
     if args.verbose:
         logger.setLevel(logging.DEBUG)
@@ -219,23 +240,19 @@ def main():
     # 1. Walk directory and collect candidate files
     logger.info(f"Scanning target directory: {scan_path}")
     
-    # We must exclude the output directory if it is located inside the scan directory
     exclude_paths = {output_path}
-    
-    files_to_process = []  # List of Tuple[file_path_str, file_type_str]
-    valid_scanned_metadata = []  # List of MediaMetadata (pulled from cache)
+    files_to_process = []
+    valid_scanned_metadata = []
     visited_paths = set()
     failed_files = []
 
     for root, dirs, files in os.walk(scan_path):
         current_dir = Path(root).resolve()
         
-        # Prune output_dir if it's nested to avoid infinite self-scans
         if any(current_dir == p or p in current_dir.parents for p in exclude_paths):
             continue
 
         for filename in files:
-            # Skip hidden files
             if filename.startswith('.'):
                 continue
 
@@ -251,7 +268,6 @@ def main():
 
             visited_paths.add(str(file_path))
 
-            # Fetch file stats
             try:
                 file_size = file_path.stat().st_size
                 mtime = file_path.stat().st_mtime
@@ -260,7 +276,6 @@ def main():
                 failed_files.append(str(file_path))
                 continue
 
-            # Check cache
             cached = cached_metadata.get(str(file_path))
             if cached and cached.file_size == file_size and cached.modified_time == mtime:
                 valid_scanned_metadata.append(cached)
@@ -310,7 +325,6 @@ def main():
                     logger.error(f"Processing failed for {res['file_path']}: {res['error']}")
                     failed_files.append(res['file_path'])
 
-        # Save newly processed metadata to cache in single transaction
         if processed_results:
             logger.info(f"Saving {len(processed_results)} newly processed records to cache DB.")
             db_handler.save_metadata_batch(processed_results)
@@ -323,7 +337,6 @@ def main():
         duration_tolerance=args.duration_tolerance
     )
 
-    # Build maps of duplicates to identify winners and losers
     all_losers = []
     all_winners = []
     duplicate_count = 0
@@ -332,11 +345,9 @@ def main():
     # 4. Winner resolution & Safe Moves
     archiver = FileArchiver(scan_path, output_path, dry_run=args.dry_run)
 
-    # Process failed/corrupted files
     for failed_path in failed_files:
         archiver.move_failed_file(failed_path)
 
-    # Process duplicate groups
     resolved_groups = []
     for group_idx, cluster in enumerate(duplicate_clusters, 1):
         winner, losers = QualityEvaluator.resolve_cluster(cluster)
@@ -348,9 +359,6 @@ def main():
         archiver.archive_duplicate_group(group_idx, winner, losers)
         resolved_groups.append((winner, losers))
 
-    # Keep list contains:
-    # - Winners of duplicate groups
-    # - Singletons (files not part of any duplicate cluster, and not failed)
     grouped_paths = {m.file_path for cluster in duplicate_clusters for m in cluster}
     failed_paths_set = set(failed_files)
     singletons = [
@@ -363,7 +371,6 @@ def main():
     for winner in all_winners:
         archiver.create_keep_symlink(winner)
 
-    # Write detailed summary report file to output directory
     if not args.dry_run:
         write_summary_report(
             output_path, singletons, all_winners, resolved_groups,
