@@ -247,6 +247,10 @@ class TestBestTake(unittest.TestCase):
         res_root = client.get("/")
         self.assertEqual(res_root.status_code, 200)
 
+        # Test crop endpoint with missing file (should return 404)
+        res_crop = client.get("/api/references/crop/non_existent.jpg")
+        self.assertEqual(res_crop.status_code, 404)
+
     def test_winner_selection_override(self):
         m1 = MediaMetadata("p1.jpg", "image", 200, 1.0, "md5_1", "h1", width=640, height=480, me_present=1)
         m2 = MediaMetadata("p2.jpg", "image", 100, 1.0, "md5_2", "h2", width=320, height=240, me_present=1)

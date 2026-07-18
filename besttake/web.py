@@ -1,4 +1,5 @@
 import os
+import io
 import sys
 import shutil
 import logging
@@ -7,7 +8,7 @@ from typing import Dict, List, Optional
 from threading import Thread
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -20,7 +21,7 @@ from besttake.archiver import FileArchiver
 
 logger = logging.getLogger("BestTakeWeb")
 
-app = FastAPI(title="BestTake Web Interface", version="1.1.0")
+app = FastAPI(title="BestTake Web Interface", version="1.2.0")
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
@@ -31,6 +32,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 scan_state = {
     "running": False,
     "cancelled": False,
+    "stage": "Idle",
     "current": 0,
     "total": 0,
     "message": "Idle",
@@ -49,7 +51,7 @@ class ScanRequest(BaseModel):
 
 class BulkMoveRequest(BaseModel):
     file_paths: List[str]
-    target_category: str  # 'me', 'others', 'scenery', 'review'
+    target_category: str
     output_dir: Optional[str] = None
 
 
@@ -85,7 +87,6 @@ def get_references():
         try:
             import face_recognition
             img = face_recognition.load_image_file(str(f))
-            # Upsample 2x to detect small/angled faces accurately
             locs = face_recognition.face_locations(img, number_of_times_to_upsample=2)
             face_count = len(locs)
             if face_count != 1:
@@ -101,10 +102,54 @@ def get_references():
             "face_count": face_count,
             "status": status,
             "error": error_msg,
-            "url": f"/api/references/file/{f.name}"
+            "url": f"/api/references/file/{f.name}",
+            "crop_url": f"/api/references/crop/{f.name}"
         })
 
     return {"references": results, "active": len(results) > 0}
+
+
+@app.get("/api/references/crop/{filename}")
+def get_reference_face_crop(filename: str):
+    """Detects and returns a cropped thumbnail of the face in a reference photo."""
+    ref_dir = Path("me_references").resolve()
+    target = (ref_dir / filename).resolve()
+
+    if not str(target).startswith(str(ref_dir)) or not target.exists():
+        raise HTTPException(status_code=404, detail="Reference image not found")
+
+    try:
+        import face_recognition
+        from PIL import Image
+
+        img_arr = face_recognition.load_image_file(str(target))
+        locs = face_recognition.face_locations(img_arr, number_of_times_to_upsample=2)
+
+        pil_img = Image.fromarray(img_arr)
+        if locs:
+            top, right, bottom, left = locs[0]
+            # Add 25% padding around the face bounding box
+            height = bottom - top
+            width = right - left
+            pad_h = int(height * 0.25)
+            pad_w = int(width * 0.25)
+
+            crop_top = max(0, top - pad_h)
+            crop_bottom = min(pil_img.height, bottom + pad_h)
+            crop_left = max(0, left - pad_w)
+            crop_right = min(pil_img.width, right + pad_w)
+
+            cropped = pil_img.crop((crop_left, crop_top, crop_right, crop_bottom))
+        else:
+            cropped = pil_img
+
+        buf = io.BytesIO()
+        cropped.save(buf, format="JPEG")
+        buf.seek(0)
+        return StreamingResponse(buf, media_type="image/jpeg")
+    except Exception as e:
+        logger.error(f"Failed to generate face crop for {filename}: {e}")
+        return FileResponse(target)
 
 
 @app.post("/api/references/upload")
@@ -148,9 +193,10 @@ def run_scan_pipeline(scan_dir_str: str, threshold: int, face_tolerance: float, 
     global scan_state
     scan_state["running"] = True
     scan_state["cancelled"] = False
+    scan_state["stage"] = "Stage 1/4: Scanning Files"
     scan_state["current"] = 0
     scan_state["total"] = 0
-    scan_state["message"] = "Initializing scan pipeline..."
+    scan_state["message"] = "Scanning target directory..."
     scan_state["summary"] = None
 
     try:
@@ -182,7 +228,6 @@ def run_scan_pipeline(scan_dir_str: str, threshold: int, face_tolerance: float, 
 
         cached_metadata = db_handler.get_cached_metadata()
 
-        scan_state["message"] = "Scanning file directory..."
         IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp'}
         VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.mov', '.avi'}
 
@@ -225,10 +270,13 @@ def run_scan_pipeline(scan_dir_str: str, threshold: int, face_tolerance: float, 
 
         if scan_state["cancelled"]:
             scan_state["running"] = False
+            scan_state["stage"] = "Cancelled"
             scan_state["message"] = "Scan stopped by user."
             return
 
+        scan_state["stage"] = "Stage 2/4: Media Processing"
         scan_state["total"] = len(files_to_process)
+        scan_state["current"] = 0
         scan_state["message"] = f"Processing {len(files_to_process)} media files..."
 
         processed_results = []
@@ -267,12 +315,14 @@ def run_scan_pipeline(scan_dir_str: str, threshold: int, face_tolerance: float, 
 
             if scan_state["cancelled"]:
                 scan_state["running"] = False
+                scan_state["stage"] = "Cancelled"
                 scan_state["message"] = "Scan stopped by user."
                 return
 
             if processed_results:
                 db_handler.save_metadata_batch(processed_results)
 
+        scan_state["stage"] = "Stage 3/4: Clustering & Deduplication"
         scan_state["message"] = "Clustering & Resolving Winners..."
         duplicate_clusters = MediaClusterer.cluster(
             valid_scanned_metadata,
@@ -280,6 +330,8 @@ def run_scan_pipeline(scan_dir_str: str, threshold: int, face_tolerance: float, 
             duration_tolerance=duration_tolerance
         )
 
+        scan_state["stage"] = "Stage 4/4: Archiving Files"
+        scan_state["message"] = "Moving keepers, duplicates, and review files..."
         archiver = FileArchiver(scan_path, output_path, dry_run=dry_run)
         for failed_path in failed_files:
             archiver.move_failed_file(failed_path)
@@ -307,6 +359,7 @@ def run_scan_pipeline(scan_dir_str: str, threshold: int, face_tolerance: float, 
             archiver.create_keep_symlink(winner)
 
         scan_state["running"] = False
+        scan_state["stage"] = "Completed"
         scan_state["message"] = "Scan completed successfully!"
         scan_state["summary"] = {
             "total_scanned": len(visited_paths),
@@ -324,6 +377,7 @@ def run_scan_pipeline(scan_dir_str: str, threshold: int, face_tolerance: float, 
     except Exception as e:
         logger.error(f"Scan pipeline failed: {e}", exc_info=True)
         scan_state["running"] = False
+        scan_state["stage"] = "Error"
         scan_state["message"] = f"Error: {str(e)}"
 
 
@@ -349,7 +403,6 @@ def start_scan(req: ScanRequest):
 
 @app.post("/api/scan/stop")
 def stop_scan():
-    """Signals current scan to stop."""
     global scan_state
     if scan_state["running"]:
         scan_state["cancelled"] = True
@@ -450,7 +503,6 @@ def get_results(output_dir: Optional[str] = None):
 
 @app.post("/api/media/move_bulk")
 def move_media_bulk(req: BulkMoveRequest):
-    """Moves selected physical media files into keep/[target_category]/ and updates metadata."""
     valid_categories = {'me', 'others', 'scenery', 'review'}
     if req.target_category not in valid_categories:
         raise HTTPException(status_code=400, detail="Invalid target category.")
@@ -464,9 +516,6 @@ def move_media_bulk(req: BulkMoveRequest):
             errors.append(f"File not found: {path_str}")
             continue
 
-        # Find output_dir (e.g. parent _best_take_output)
-        # Find 'keep' parent directory
-        keep_idx = None
         parts = list(src.parts)
         if 'keep' in parts:
             idx = parts.index('keep')

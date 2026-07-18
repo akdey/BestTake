@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const progressSection = document.getElementById('progressSection');
   const progressStatus = document.getElementById('progressStatus');
   const progressCount = document.getElementById('progressCount');
+  const stageBadge = document.getElementById('stageBadge');
   const progressBarFill = document.getElementById('progressBarFill');
 
   const summarySection = document.getElementById('summarySection');
@@ -65,11 +66,9 @@ document.addEventListener('DOMContentLoaded', () => {
   let activeOutputDir = null;
   let selectedFilePaths = new Set();
 
-  // Range Slider Feedback
   thresholdInput.addEventListener('input', (e) => thresholdVal.textContent = e.target.value);
   faceTolInput.addEventListener('input', (e) => faceTolVal.textContent = parseFloat(e.target.value).toFixed(2));
 
-  // --- Toast System ---
   function showToast(message, type = 'info') {
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
@@ -81,7 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 3500);
   }
 
-  // --- References Management ---
+  // --- References Management with Face Crop Preview ---
   async function loadReferences() {
     try {
       const res = await fetch('/api/references');
@@ -102,9 +101,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
       referencesList.innerHTML = data.references.map(ref => `
         <div class="ref-card">
-          <img src="${ref.url}" alt="${ref.filename}">
+          <img src="${ref.url}" alt="${ref.filename}" class="main-img">
+          ${ref.status === 'valid' ? `
+            <div class="crop-overlay" title="Detected Face Crop">
+              <img src="${ref.crop_url}?t=${Date.now()}" alt="Face Crop">
+            </div>
+          ` : ''}
           <button class="delete-btn" onclick="deleteReference('${ref.filename}')">&times;</button>
-          <span class="badge-status ${ref.status}">${ref.status === 'valid' ? '✓ 1 Face' : '⚠️ ' + ref.face_count + ' Faces'}</span>
+          <span class="badge-status ${ref.status}">${ref.status === 'valid' ? '✓ 1 Face Extracted' : '⚠️ ' + ref.face_count + ' Faces'}</span>
         </div>
       `).join('');
     } catch (err) {
@@ -145,7 +149,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadReferences();
   }
 
-  // --- Scan Execution & Stop ---
+  // --- Scan Execution & Live Stage Monitor ---
   scanForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const scanDir = scanDirInput.value.trim();
@@ -208,15 +212,26 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await fetch('/api/scan/progress');
       const data = await res.json();
 
-      progressStatus.textContent = data.message;
-      if (data.total > 0) {
-        const pct = Math.round((data.current / data.total) * 100);
-        progressCount.textContent = `${data.current} / ${data.total} (${pct}%)`;
-        progressBarFill.style.width = `${pct}%`;
-      } else {
-        progressCount.textContent = '';
-        progressBarFill.style.width = '100%';
+      if (stageBadge && data.stage) {
+        stageBadge.textContent = data.stage;
       }
+      progressStatus.textContent = data.message;
+
+      let pct = 0;
+      if (data.stage && data.stage.includes('Stage 1')) {
+        pct = 15;
+      } else if (data.stage && data.stage.includes('Stage 2')) {
+        pct = data.total > 0 ? 15 + Math.round((data.current / data.total) * 65) : 75;
+        progressCount.textContent = `${data.current} / ${data.total} (${pct}%)`;
+      } else if (data.stage && data.stage.includes('Stage 3')) {
+        pct = 85;
+      } else if (data.stage && data.stage.includes('Stage 4')) {
+        pct = 95;
+      } else if (data.stage === 'Completed') {
+        pct = 100;
+      }
+
+      progressBarFill.style.width = `${pct}%`;
 
       if (!data.running) {
         clearInterval(pollInterval);
@@ -234,7 +249,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // --- Results & Multi-Select Galleries ---
+  // --- Results & Galleries ---
   async function loadResults(outputDir) {
     try {
       const res = await fetch(`/api/results?output_dir=${encodeURIComponent(outputDir)}`);
@@ -348,7 +363,6 @@ document.addEventListener('DOMContentLoaded', () => {
     `).join('');
   }
 
-  // --- Multi-Select & Bulk Moving ---
   window.toggleSelectFile = (e, path) => {
     e.stopPropagation();
     if (selectedFilePaths.has(path)) {
@@ -426,7 +440,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
-  // --- Tabs Navigation ---
   tabBtns.forEach(btn => {
     btn.addEventListener('click', () => {
       tabBtns.forEach(b => b.classList.remove('active'));
@@ -438,7 +451,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // --- Lightbox Modal ---
   window.openLightbox = (url, type, name, meta) => {
     if (type === 'video') {
       lightboxBody.innerHTML = `<video src="${url}" controls autoplay style="max-width: 100%; max-height: 70vh;"></video>`;

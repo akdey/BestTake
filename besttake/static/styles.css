@@ -161,7 +161,7 @@ body {
 
 .references-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
   gap: 12px;
   margin-top: 18px;
 }
@@ -175,7 +175,26 @@ body {
   background: #000;
 }
 
-.ref-card img {
+.ref-card img.main-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ref-card .crop-overlay {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 2px solid var(--accent-green);
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.8);
+  background: #000;
+}
+
+.ref-card .crop-overlay img {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -196,6 +215,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  z-index: 10;
 }
 
 .ref-card .badge-status {
@@ -207,7 +227,7 @@ body {
   padding: 2px 4px;
   border-radius: 4px;
   text-align: center;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.75);
 }
 
 .ref-card .badge-status.valid { color: var(--accent-green); }
@@ -334,8 +354,26 @@ input:checked + .slider:before { transform: translateX(20px); }
 .progress-header {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   margin-bottom: 12px;
   font-size: 14px;
+}
+
+.progress-title-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.badge-stage {
+  background: rgba(99, 102, 241, 0.25);
+  color: var(--primary);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  text-transform: uppercase;
 }
 
 .progress-bar-bg {
