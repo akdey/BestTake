@@ -3,6 +3,9 @@ import hashlib
 import logging
 from typing import Tuple, List
 
+from PIL import Image, ImageOps
+import numpy as np
+
 logger = logging.getLogger("BestTake")
 
 # Global reference encodings and config cached inside the process worker memory space
@@ -49,12 +52,12 @@ def process_media_worker(args: Tuple[str, str]) -> dict:
         min_sharp = min_review_sharpness if 'min_review_sharpness' in globals() else 50.0
 
         if file_type == 'image':
-            from PIL import Image
             import imagehash
             import cv2
 
-            # 1. Dimensions and Perceptual Hashing
-            with Image.open(file_path) as img:
+            # 1. Dimensions and Perceptual Hashing with EXIF Transpose
+            with Image.open(file_path) as raw_img:
+                img = ImageOps.exif_transpose(raw_img)
                 width, height = img.size
                 phash_val = str(imagehash.phash(img))
 
@@ -64,16 +67,19 @@ def process_media_worker(args: Tuple[str, str]) -> dict:
                 raise ValueError("OpenCV failed to decode image")
             sharpness = float(cv2.Laplacian(cv_img, cv2.CV_64F).var())
 
-            # 3. Face recognition with 1x upsampling for higher precision
+            # 3. Face recognition with EXIF Transpose & 1x upsampling for higher precision
             if known_encodings:
                 try:
                     import face_recognition
-                    face_image = face_recognition.load_image_file(file_path)
-                    # Upsample by 1 to detect smaller, angled, or shadowed faces
-                    face_locs = face_recognition.face_locations(face_image, number_of_times_to_upsample=1)
+                    raw_arr = face_recognition.load_image_file(file_path)
+                    pil_face_img = Image.fromarray(raw_arr)
+                    pil_face_img = ImageOps.exif_transpose(pil_face_img)
+                    face_arr = np.array(pil_face_img.convert('RGB'))
+
+                    face_locs = face_recognition.face_locations(face_arr, number_of_times_to_upsample=1)
                     if face_locs:
                         me_present = 2
-                        face_encs = face_recognition.face_encodings(face_image, face_locs)
+                        face_encs = face_recognition.face_encodings(face_arr, face_locs)
                         for enc in face_encs:
                             matches = face_recognition.compare_faces(known_encodings, enc, tolerance=tol)
                             if any(matches):
@@ -106,7 +112,6 @@ def process_media_worker(args: Tuple[str, str]) -> dict:
         elif file_type == 'video':
             import cv2
             import imagehash
-            from PIL import Image
 
             cap = cv2.VideoCapture(file_path)
             if not cap.isOpened():
@@ -123,7 +128,6 @@ def process_media_worker(args: Tuple[str, str]) -> dict:
 
             duration = frame_count / fps
 
-            # Keyframe Temporal Hashing
             marks = [0.1, 0.3, 0.5, 0.7, 0.9]
             frame_indices = [int(m * frame_count) for m in marks]
             frame_indices = [max(0, min(idx, frame_count - 1)) for idx in frame_indices]
@@ -139,7 +143,6 @@ def process_media_worker(args: Tuple[str, str]) -> dict:
                 pil_img = Image.fromarray(frame_rgb)
                 hashes.append(str(imagehash.phash(pil_img)))
 
-            # Face Filtering with 1x upsampling
             if known_encodings:
                 try:
                     import face_recognition
@@ -156,7 +159,6 @@ def process_media_worker(args: Tuple[str, str]) -> dict:
                             frame_idx += step
                             continue
 
-                        # Resize frame to 50% for improved detail while retaining speed
                         h, w = frame.shape[:2]
                         resized_frame = cv2.resize(frame, (int(w * 0.5), int(h * 0.5)))
                         rgb_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)

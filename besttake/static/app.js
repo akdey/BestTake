@@ -80,7 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 3500);
   }
 
-  // --- References Management with Face Crop Preview ---
+  // --- References Management with Extracted Face Avatar ---
   async function loadReferences() {
     try {
       const res = await fetch('/api/references');
@@ -101,13 +101,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
       referencesList.innerHTML = data.references.map(ref => `
         <div class="ref-card">
-          <img src="${ref.url}" alt="${ref.filename}" class="main-img">
-          ${ref.status === 'valid' ? `
-            <div class="crop-overlay" title="Detected Face Crop">
-              <img src="${ref.crop_url}?t=${Date.now()}" alt="Face Crop">
-            </div>
-          ` : ''}
           <button class="delete-btn" onclick="deleteReference('${ref.filename}')">&times;</button>
+          <div class="avatar-box ${ref.status !== 'valid' ? 'warning' : ''}" title="Extracted Face Avatar">
+            <img src="${ref.status === 'valid' ? ref.crop_url + '?t=' + Date.now() : ref.url}" alt="Extracted Face">
+          </div>
+          <img src="${ref.url}" alt="${ref.filename}" class="original-thumb">
           <span class="badge-status ${ref.status}">${ref.status === 'valid' ? '✓ 1 Face Extracted' : '⚠️ ' + ref.face_count + ' Faces'}</span>
         </div>
       `).join('');

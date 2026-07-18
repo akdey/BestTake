@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from threading import Thread
 
+from PIL import Image, ImageOps
+import numpy as np
+
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -21,7 +24,7 @@ from besttake.archiver import FileArchiver
 
 logger = logging.getLogger("BestTakeWeb")
 
-app = FastAPI(title="BestTake Web Interface", version="1.2.0")
+app = FastAPI(title="BestTake Web Interface", version="1.3.0")
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
@@ -86,8 +89,11 @@ def get_references():
 
         try:
             import face_recognition
-            img = face_recognition.load_image_file(str(f))
-            locs = face_recognition.face_locations(img, number_of_times_to_upsample=2)
+            pil_img = Image.open(str(f))
+            pil_img = ImageOps.exif_transpose(pil_img)
+            img_arr = np.array(pil_img.convert('RGB'))
+
+            locs = face_recognition.face_locations(img_arr, number_of_times_to_upsample=2)
             face_count = len(locs)
             if face_count != 1:
                 status = "warning"
@@ -111,7 +117,7 @@ def get_references():
 
 @app.get("/api/references/crop/{filename}")
 def get_reference_face_crop(filename: str):
-    """Detects and returns a cropped thumbnail of the face in a reference photo."""
+    """Detects and returns an EXIF-normalized cropped thumbnail of the face in a reference photo."""
     ref_dir = Path("me_references").resolve()
     target = (ref_dir / filename).resolve()
 
@@ -120,15 +126,15 @@ def get_reference_face_crop(filename: str):
 
     try:
         import face_recognition
-        from PIL import Image
 
-        img_arr = face_recognition.load_image_file(str(target))
+        pil_img = Image.open(str(target))
+        pil_img = ImageOps.exif_transpose(pil_img)
+        img_arr = np.array(pil_img.convert('RGB'))
+
         locs = face_recognition.face_locations(img_arr, number_of_times_to_upsample=2)
 
-        pil_img = Image.fromarray(img_arr)
         if locs:
             top, right, bottom, left = locs[0]
-            # Add 25% padding around the face bounding box
             height = bottom - top
             width = right - left
             pad_h = int(height * 0.25)
@@ -217,10 +223,13 @@ def run_scan_pipeline(scan_dir_str: str, threshold: int, face_tolerance: float, 
             for ref_file in me_ref_path.iterdir():
                 if ref_file.suffix.lower() in ref_exts:
                     try:
-                        img = face_recognition.load_image_file(str(ref_file))
-                        locs = face_recognition.face_locations(img, number_of_times_to_upsample=2)
+                        pil_img = Image.open(str(ref_file))
+                        pil_img = ImageOps.exif_transpose(pil_img)
+                        img_arr = np.array(pil_img.convert('RGB'))
+
+                        locs = face_recognition.face_locations(img_arr, number_of_times_to_upsample=2)
                         if len(locs) == 1:
-                            encs = face_recognition.face_encodings(img, locs)
+                            encs = face_recognition.face_encodings(img_arr, locs)
                             if encs:
                                 known_encodings.append(encs[0])
                     except Exception:

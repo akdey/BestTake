@@ -134,7 +134,7 @@ body {
 .dropzone {
   border: 2px dashed rgba(255, 255, 255, 0.15);
   border-radius: 12px;
-  padding: 24px;
+  padding: 20px;
   text-align: center;
   cursor: pointer;
   background: rgba(255, 255, 255, 0.02);
@@ -147,9 +147,9 @@ body {
 }
 
 .upload-icon {
-  font-size: 28px;
+  font-size: 24px;
   display: block;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .hint {
@@ -159,51 +159,57 @@ body {
   margin-top: 4px;
 }
 
+/* Reference Cards Layout */
 .references-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 14px;
   margin-top: 18px;
 }
 
 .ref-card {
   position: relative;
-  border-radius: 10px;
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.35);
   border: 1px solid var(--card-border);
-  aspect-ratio: 1/1;
-  background: #000;
+  border-radius: 12px;
+  padding: 10px;
+  gap: 8px;
 }
 
-.ref-card img.main-img {
+.ref-card .avatar-box {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  border: 2px solid var(--accent-green);
+  overflow: hidden;
+  background: #000;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+
+.ref-card .avatar-box.warning {
+  border-color: var(--accent-amber);
+}
+
+.ref-card .avatar-box img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.ref-card .crop-overlay {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
-  border: 2px solid var(--accent-green);
-  overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.8);
-  background: #000;
-}
-
-.ref-card .crop-overlay img {
+.ref-card .original-thumb {
   width: 100%;
-  height: 100%;
+  height: 70px;
+  border-radius: 8px;
   object-fit: cover;
 }
 
 .ref-card .delete-btn {
   position: absolute;
-  top: 4px;
-  right: 4px;
+  top: 6px;
+  right: 6px;
   background: rgba(239, 68, 68, 0.85);
   color: #fff;
   border: none;
@@ -219,15 +225,12 @@ body {
 }
 
 .ref-card .badge-status {
-  position: absolute;
-  bottom: 4px;
-  left: 4px;
-  right: 4px;
   font-size: 10px;
-  padding: 2px 4px;
+  padding: 3px 6px;
   border-radius: 4px;
   text-align: center;
-  background: rgba(0, 0, 0, 0.75);
+  width: 100%;
+  background: rgba(0, 0, 0, 0.6);
 }
 
 .ref-card .badge-status.valid { color: var(--accent-green); }
