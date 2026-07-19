@@ -3,20 +3,39 @@ import hashlib
 import logging
 from typing import Tuple, List
 
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 from PIL import Image, ImageOps
 import numpy as np
 
+try:
+    import cv2
+    cv2.setNumThreads(0)
+except Exception:
+    pass
+
 logger = logging.getLogger("BestTake")
 
-# Global reference encodings and config cached inside the process worker memory space
 known_encodings: List = []
 face_tolerance_val: float = 0.48
 min_review_sharpness: float = 50.0
 
-def init_worker(encodings: List, tolerance: float = 0.48, review_sharpness: float = 50.0):
+def init_worker(encodings_list: List, tolerance: float = 0.48, review_sharpness: float = 50.0):
     """Initializer for Pool workers to load known face encodings and config settings."""
     global known_encodings, face_tolerance_val, min_review_sharpness
-    known_encodings = encodings
+    try:
+        import cv2
+        cv2.setNumThreads(0)
+    except Exception:
+        pass
+    try:
+        known_encodings = [np.array(e) if isinstance(e, list) else e for e in encodings_list] if encodings_list else []
+    except Exception:
+        known_encodings = []
     face_tolerance_val = tolerance
     min_review_sharpness = review_sharpness
 
@@ -55,19 +74,16 @@ def process_media_worker(args: Tuple[str, str]) -> dict:
             import imagehash
             import cv2
 
-            # 1. Dimensions and Perceptual Hashing with EXIF Transpose
             with Image.open(file_path) as raw_img:
                 img = ImageOps.exif_transpose(raw_img)
                 width, height = img.size
                 phash_val = str(imagehash.phash(img))
 
-            # 2. OpenCV Laplacian Sharpness
             cv_img = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
             if cv_img is None:
                 raise ValueError("OpenCV failed to decode image")
             sharpness = float(cv2.Laplacian(cv_img, cv2.CV_64F).var())
 
-            # 3. Face recognition with EXIF Transpose & 1x upsampling for higher precision
             if known_encodings:
                 try:
                     import face_recognition
@@ -90,7 +106,6 @@ def process_media_worker(args: Tuple[str, str]) -> dict:
                 except Exception as fe:
                     logger.debug(f"Face filtering failed for image {file_path}: {fe}")
 
-            # If not user's face, check for low sharpness/blurry review
             if me_present != 1 and sharpness < min_sharp:
                 me_present = 3
 

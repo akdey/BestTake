@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from threading import Thread
 
+# Thread safety environment locks for macOS multiprocessing
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+
 from PIL import Image, ImageOps
 import numpy as np
 
@@ -259,7 +264,7 @@ def run_scan_pipeline(scan_dir_str: str, threshold: int, face_tolerance: float, 
                         if len(locs) == 1:
                             encs = face_recognition.face_encodings(img_arr, locs)
                             if encs:
-                                known_encodings.append(encs[0])
+                                known_encodings.append(encs[0].tolist())
                     except Exception:
                         pass
 
@@ -319,8 +324,9 @@ def run_scan_pipeline(scan_dir_str: str, threshold: int, face_tolerance: float, 
         processed_results = []
         if files_to_process:
             import multiprocessing
+            ctx = multiprocessing.get_context('spawn')
             num_cores = multiprocessing.cpu_count()
-            with multiprocessing.Pool(
+            with ctx.Pool(
                 processes=num_cores,
                 initializer=init_worker,
                 initargs=(known_encodings, face_tolerance, min_review_sharpness)

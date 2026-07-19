@@ -179,6 +179,11 @@ body {
   gap: 8px;
 }
 
+.ref-card.uploading {
+  opacity: 0.8;
+  border-color: var(--primary);
+}
+
 .ref-card .avatar-box {
   width: 58px;
   height: 58px;
@@ -191,6 +196,22 @@ body {
 
 .ref-card .avatar-box.warning {
   border-color: var(--accent-amber);
+}
+
+.ref-card .avatar-box.scanning {
+  border-color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(99, 102, 241, 0.2);
+  animation: pulse 1.2s infinite ease-in-out;
+  font-size: 20px;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.06); opacity: 1; }
+  100% { transform: scale(1); opacity: 0.8; }
 }
 
 .ref-card .avatar-box img {
@@ -235,6 +256,7 @@ body {
 
 .ref-card .badge-status.valid { color: var(--accent-green); }
 .ref-card .badge-status.warning { color: var(--accent-amber); }
+.ref-card .badge-status.scanning { color: var(--primary); }
 
 /* Forms & Inputs */
 .scan-form {

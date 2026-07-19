@@ -5,6 +5,11 @@ import logging
 import multiprocessing
 from pathlib import Path
 
+# Thread safety environment locks for macOS multiprocessing
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+
 from besttake.models import MediaMetadata
 from besttake.database import DatabaseHandler
 from besttake.processor import process_media_worker, init_worker
@@ -20,7 +25,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("BestTake")
 
-# Supported media extensions (case-insensitive)
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp'}
 VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.mov', '.avi'}
 
@@ -68,7 +72,6 @@ def write_summary_report(output_path, singletons, all_winners, resolved_groups, 
         "## Detailed Breakdown\n"
     ]
     
-    # 1. Me
     lines.append("### 1. Kept Files with My Face (`keep/me/`)\n")
     if keepers_me:
         lines.append("| Original Path | Size | Resolution | Sharpness |")
@@ -81,7 +84,6 @@ def write_summary_report(output_path, singletons, all_winners, resolved_groups, 
         lines.append("*No files found.*\n")
     lines.append("")
     
-    # 2. Others
     lines.append("### 2. Kept Files with Others' Faces (`keep/others/`)\n")
     if keepers_others:
         lines.append("| Original Path | Size | Resolution |")
@@ -93,7 +95,6 @@ def write_summary_report(output_path, singletons, all_winners, resolved_groups, 
         lines.append("*No files found.*\n")
     lines.append("")
 
-    # 3. Scenery
     lines.append("### 3. Kept Scenery Files (`keep/scenery/`)\n")
     if keepers_scenery:
         lines.append("| Original Path | Size |")
@@ -104,7 +105,6 @@ def write_summary_report(output_path, singletons, all_winners, resolved_groups, 
         lines.append("*No files found.*\n")
     lines.append("")
 
-    # 4. Review
     lines.append("### 4. Low Quality / Blurry Review Files (`keep/review/`)\n")
     if keepers_review:
         lines.append("| Original Path | Size | Sharpness |")
@@ -116,7 +116,6 @@ def write_summary_report(output_path, singletons, all_winners, resolved_groups, 
         lines.append("*No blurry files found.*\n")
     lines.append("")
 
-    # 5. Failed
     lines.append("### 5. Failed / Unreadable Media (`failed/`)\n")
     if failed_files:
         lines.append("| File Path |")
@@ -127,7 +126,6 @@ def write_summary_report(output_path, singletons, all_winners, resolved_groups, 
         lines.append("*No failures.*")
     lines.append("")
 
-    # 6. Duplicates
     lines.append("### 6. Duplicate Groups (`duplicates/`)\n")
     if resolved_groups:
         for idx, (winner, losers) in enumerate(resolved_groups, 1):
@@ -222,7 +220,6 @@ def main():
             for ref_file in ref_files:
                 try:
                     image = face_recognition.load_image_file(str(ref_file))
-                    # Upsample 2x to detect small or angled faces
                     face_locations = face_recognition.face_locations(image, number_of_times_to_upsample=2)
                     if len(face_locations) == 1:
                         encs = face_recognition.face_encodings(image, face_locations)
@@ -307,10 +304,11 @@ def main():
 
     processed_results = []
     if files_to_process:
+        ctx = multiprocessing.get_context('spawn')
         num_cores = multiprocessing.cpu_count()
         logger.info(f"Launching processing queue with {len(files_to_process)} items using {num_cores} workers...")
         
-        with multiprocessing.Pool(
+        with ctx.Pool(
             processes=num_cores,
             initializer=init_worker,
             initargs=(known_face_encodings, args.face_tolerance, args.review_sharpness)

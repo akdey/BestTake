@@ -130,6 +130,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function uploadFiles(files) {
     for (let file of files) {
+      const tempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4);
+      const fileUrl = URL.createObjectURL(file);
+      
+      const emptyState = referencesList.querySelector('.empty-state');
+      if (emptyState) emptyState.remove();
+
+      const tempCard = document.createElement('div');
+      tempCard.className = 'ref-card uploading';
+      tempCard.id = tempId;
+      tempCard.innerHTML = `
+        <div class="avatar-box scanning" title="Scanning Face...">🔍</div>
+        <img src="${fileUrl}" alt="${file.name}" class="original-thumb">
+        <span class="badge-status scanning">🔍 Scanning Face...</span>
+      `;
+      referencesList.prepend(tempCard);
+
       const formData = new FormData();
       formData.append('file', file);
       try {
@@ -137,10 +153,23 @@ document.addEventListener('DOMContentLoaded', () => {
           method: 'POST',
           body: formData
         });
-        if (res.ok) {
+        const data = await res.json();
+        if (res.ok && data.reference) {
+          const ref = data.reference;
+          tempCard.className = 'ref-card';
+          tempCard.removeAttribute('id');
+          tempCard.innerHTML = `
+            <button class="delete-btn" onclick="deleteReference('${ref.filename}')">&times;</button>
+            <div class="avatar-box ${ref.status !== 'valid' ? 'warning' : ''}" title="Extracted Face Avatar">
+              <img src="${ref.status === 'valid' ? ref.crop_url + '?t=' + Date.now() : ref.url}" alt="Extracted Face">
+            </div>
+            <img src="${ref.url}" alt="${ref.filename}" class="original-thumb">
+            <span class="badge-status ${ref.status}">${ref.status === 'valid' ? '✓ 1 Face Extracted' : '⚠️ ' + ref.face_count + ' Faces'}</span>
+          `;
           showToast(`Uploaded ${file.name}`, 'info');
         }
       } catch (err) {
+        tempCard.remove();
         showToast(`Failed to upload ${file.name}`, 'error');
       }
     }
