@@ -24,7 +24,7 @@ from besttake.archiver import FileArchiver
 
 logger = logging.getLogger("BestTakeWeb")
 
-app = FastAPI(title="BestTake Web Interface", version="1.3.0")
+app = FastAPI(title="BestTake Web Interface", version="1.4.0")
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
@@ -117,7 +117,6 @@ def get_references():
 
 @app.get("/api/references/crop/{filename}")
 def get_reference_face_crop(filename: str):
-    """Detects and returns an EXIF-normalized cropped thumbnail of the face in a reference photo."""
     ref_dir = Path("me_references").resolve()
     target = (ref_dir / filename).resolve()
 
@@ -171,7 +170,36 @@ async def upload_reference(file: UploadFile = File(...)):
     with open(dest_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    return {"status": "success", "filename": file.filename}
+    face_count = 0
+    status = "valid"
+    error_msg = ""
+
+    try:
+        import face_recognition
+        pil_img = Image.open(str(dest_path))
+        pil_img = ImageOps.exif_transpose(pil_img)
+        img_arr = np.array(pil_img.convert('RGB'))
+
+        locs = face_recognition.face_locations(img_arr, number_of_times_to_upsample=2)
+        face_count = len(locs)
+        if face_count != 1:
+            status = "warning"
+            error_msg = f"Found {face_count} face(s). Exactly 1 face recommended."
+    except Exception as e:
+        status = "error"
+        error_msg = str(e)
+
+    ref_data = {
+        "filename": file.filename,
+        "size": dest_path.stat().st_size,
+        "face_count": face_count,
+        "status": status,
+        "error": error_msg,
+        "url": f"/api/references/file/{file.filename}",
+        "crop_url": f"/api/references/crop/{file.filename}"
+    }
+
+    return {"status": "success", "filename": file.filename, "reference": ref_data}
 
 
 @app.delete("/api/references/{filename}")

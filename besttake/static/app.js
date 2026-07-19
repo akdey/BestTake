@@ -119,7 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       await fetch(`/api/references/${filename}`, { method: 'DELETE' });
       showToast(`Deleted reference ${filename}`, 'info');
-      loadReferences();
+      await loadReferences();
     } catch (err) {
       showToast('Failed to delete reference.', 'error');
     }
@@ -144,7 +144,7 @@ document.addEventListener('DOMContentLoaded', () => {
         showToast(`Failed to upload ${file.name}`, 'error');
       }
     }
-    loadReferences();
+    await loadReferences();
   }
 
   // --- Scan Execution & Live Stage Monitor ---
